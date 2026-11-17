@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 64" role="img" aria-label="OUTSOURCE STUDIO">
+  <defs>
+    <linearGradient id="os-g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2F6BFF"/>
+      <stop offset="1" stop-color="#00D1B2"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#os-g2)"/>
+  <g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
+    <path d="M15.6 27.6A17 17 0 0 1 45.9 22.3"/>
+    <path d="M48.4 36.4A17 17 0 0 1 18.1 41.8"/>
+  </g>
+  <path d="M27.5 23.5 41 32 27.5 40.5Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <text x="80" y="36" font-family="Be Vietnam Pro, Segoe UI, Arial, sans-serif" font-weight="900" font-size="30" fill="#EEF2FF" letter-spacing="-0.5">OUTSOURCE</text>
+  <text x="81" y="55" font-family="JetBrains Mono, Consolas, monospace" font-weight="700" font-size="13" fill="#00D1B2" letter-spacing="6.2">STUDIO</text>
+</svg>

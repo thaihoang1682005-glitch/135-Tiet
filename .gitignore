@@ -1,0 +1,14 @@
+# Dữ liệu cá nhân / tài liệu môn học — KHÔNG đưa lên repo công khai
+Thong tin nhân sự.xlsx
+Đăng Ký Đề Tài*.docx
+Mẫu Báo Cáo/
+*.gdoc
+*.gsheet
+*.gslides
+
+# File tạm
+~$*
+.DS_Store
+desktop.ini
+Thumbs.db
+_check.txt
