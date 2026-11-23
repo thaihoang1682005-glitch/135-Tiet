@@ -5,7 +5,7 @@ window.CONFIG = {
   BRAND: "OUTSOURCE STUDIO",
 
   // URL Web App của Google Apps Script (xem HUONG-DAN-CAI-DAT.md). Để trống = chế độ demo.
-  SHEET_ENDPOINT: "",
+  SHEET_ENDPOINT: "https://script.google.com/macros/s/AKfycbyN9sOj7h3aUKdZ4QpQwmMeThbZpA1uFZ6wz4fuCzhLiULBfLe33bZleTmKm7XP66Ao/exec",
 
   // Link Google Form khảo sát (tạo từ menu 🎬 Studio trong Google Sheet). Để trống = ẩn.
   SURVEY_URL: "",

@@ -483,7 +483,7 @@ $("#fBook").addEventListener("submit", async e => {
     mo_ta: fd.get("mo_ta"), link: isEdit ? fd.get("link") : "", kenh: fd.get("kenh"), nguon: source()
   }));
   if (!ok) return;
-  form.hidden = true; $("#bookCode").textContent = code; $("#bookOk").classList.add("on");
+  form.hidden = true; $("#bookCode").textContent = ok.ma_don || code; $("#bookOk").classList.add("on");
   $("#bookOk").scrollIntoView({ block: "center" });
 });
 $("#bookAgain").addEventListener("click", () => {

@@ -75,8 +75,10 @@ function onOpen() {
 function khoiTaoHeThong() {
   const ss = SpreadsheetApp.getActive(), ui = SpreadsheetApp.getUi();
   ss.setSpreadsheetTimeZone(CFG.TZ);
-  try { ss.setSpreadsheetLocale('vi_VN'); } catch (e) {}
-  ss.setRecalculationInterval(SpreadsheetApp.RecalculationInterval.ON_CHANGE);
+  // en_GB: công thức dùng dấu phẩy, ngày dd/mm/yyyy. Không dùng vi_VN vì công thức sẽ lỗi #ERROR!
+  ss.setSpreadsheetLocale('en_GB');
+  SpreadsheetApp.flush();
+  ss.setRecalculationInterval(SpreadsheetApp.RecalculationInterval.MINUTE); // tính lại khi có thay đổi + mỗi phút
 
   // Đổi tên sheet của phiên bản cũ
   Object.keys(RENAMED).forEach(o => { const s = ss.getSheetByName(o); if (s && !ss.getSheetByName(RENAMED[o])) s.setName(RENAMED[o]); });
@@ -132,9 +134,9 @@ function ensureStructure_(ss, key) {
 function setupDH_(sh) {
   const R = n => rngLocal_('DH', n);
   sh.setTabColor(C.blue);
-  const sdt = col_('DH', 'SĐT/Zalo');
+  const sdt = R('SĐT/Zalo'), lan = `COUNTIFS(${sdt},${sdt},ROW(${sdt}),"<="&ROW(${sdt}))`;
   setArr_(sh, 'DH', 'Khách cũ?',
-    `MAP(${R('SĐT/Zalo')},ROW(${R('SĐT/Zalo')}),LAMBDA(p,r,IF(p="","",LET(n,COUNTIF(${sdt}$2:INDEX(${sdt}$2:${sdt}$${CFG.MAXR},r-1),p),IF(n>1,"🔁 Lần "&n,"Mới")))))`);
+    `ARRAYFORMULA(IF(${sdt}="","",IF(${lan}>1,"🔁 Lần "&${lan},"Mới")))`);
   setArr_(sh, 'DH', 'Còn phải thu',
     `ARRAYFORMULA(IF(${R('Giá chốt')}="","",${R('Giá chốt')}-IF(${R('Đã thu')}="",0,${R('Đã thu')})))`);
   setArr_(sh, 'DH', 'CTV đúng hạn?',
@@ -221,221 +223,165 @@ function setupNS_(sh) {
 /* ============================================================================
  *  TỔNG QUAN — toàn bộ là công thức, tự cập nhật realtime
  * ========================================================================== */
+const UI = { bg: '#0B1020', card: '#121A33', soft: '#16203F', line: '#24305A', ink: '#EEF2FF', muted: '#9AA6C9', dim: '#26325C',
+             blue: '#5B9BFF', teal: '#00D1B2', violet: '#A970FF', orange: '#FF9F1C', pink: '#FF5C8A', red: '#FF6B6B', font: 'Be Vietnam Pro' };
+
 function taoTongQuan_(ss) {
   let sh = ss.getSheetByName(SH.TQ);
-  if (sh) { sh.getCharts().forEach(c => sh.removeChart(c)); sh.clear(); sh.clearConditionalFormatRules(); sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart(); }
-  else sh = ss.insertSheet(SH.TQ);
+  if (sh) {
+    sh.getCharts().forEach(c => sh.removeChart(c));
+    if (sh.getFilter()) sh.getFilter().remove();
+    const all = sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns());
+    all.breakApart(); all.clear(); all.clearDataValidations(); all.clearNote();
+    sh.clearConditionalFormatRules();
+  } else sh = ss.insertSheet(SH.TQ);
+  const ROWS = 70, COLS = 62;
+  if (sh.getMaxRows() > ROWS) sh.deleteRows(ROWS + 1, sh.getMaxRows() - ROWS);
+  if (sh.getMaxRows() < ROWS) sh.insertRowsAfter(sh.getMaxRows(), ROWS - sh.getMaxRows());
+  if (sh.getMaxColumns() < COLS) sh.insertColumnsAfter(sh.getMaxColumns(), COLS - sh.getMaxColumns());
+  sh.setFrozenRows(0); sh.setFrozenColumns(0);
   sh.setTabColor(C.teal); sh.setHiddenGridlines(true);
-  if (sh.getMaxColumns() < 22) sh.insertColumnsAfter(sh.getMaxColumns(), 22 - sh.getMaxColumns());
-  if (sh.getMaxRows() < 90) sh.insertRowsAfter(sh.getMaxRows(), 90 - sh.getMaxRows());
+  sh.getRange(1, 1, ROWS, sh.getMaxColumns()).setBackground(UI.bg).setFontColor(UI.muted).setFontFamily(UI.font).setFontSize(10).setVerticalAlignment('middle');
+
+  sh.setColumnWidth(1, 22);
+  for (let c = 2; c <= 13; c++) sh.setColumnWidth(c, 112);
+  sh.setColumnWidth(14, 22);
+  sh.setColumnWidth(15, 40); sh.setColumnWidth(16, 40);
+  const heights = { 1: 10, 2: 40, 3: 22, 4: 10, 5: 26, 6: 44, 7: 24, 8: 10, 9: 26, 10: 44, 11: 24, 12: 12, 28: 12, 44: 12, 45: 32, 46: 26, 52: 12, 53: 32, 54: 26, 60: 12, 61: 32, 62: 26, 68: 16 };
+  for (let r = 1; r <= ROWS; r++) sh.setRowHeight(r, heights[r] || ((r >= 13 && r <= 43) ? 22 : 26));
 
   const D = n => rng_('DH', n), N = n => rng_('NS', n);
-  const st = D('Trạng thái'), ma = D('Mã đơn'), tg = D('Thời gian'), sdt = D('SĐT/Zalo');
+  const st = D('Trạng thái'), ma = D('Mã đơn'), tg = D('Thời gian'), sdt = D('SĐT/Zalo'), goi = D('Gói'), thu = D('Đã thu');
   const KS = c => `INDIRECT("'${SH.KS}'!${c}2:${c}")`;
   const active = '{' + STATUS_ACTIVE.map(s => `"${s}"`).join(',') + '}';
-  const rate = n => `=IFERROR(COUNTIF(${D(n)},"✔*")/COUNTIF(${D(n)},"?*"),"—")`;
+  const nActive = `SUMPRODUCT(COUNTIF(${st},${active}))`, nDone = `COUNTIF(${st},"Hoàn thành")`, nNew = `COUNTIF(${st},"Mới")`;
+  const rate = n => `IFERROR(COUNTIF(${D(n)},"✔*")/COUNTIF(${D(n)},"?*"),0)`;
+  const pct = f => `TEXT(${f},"0%")`;
+  const money = f => `TEXT(${f},"#,##0")&" đ"`;
+  const thuTC = `SUMIFS(${thu},${st},"<>Hủy")`, traCTV = `SUM(${D('Đã trả CTV')})`;
+  const noCTV = `SUMIFS(${D('Thù lao CTV')},${st},"<>Hủy")-SUMIFS(${D('Đã trả CTV')},${st},"<>Hủy")`;
+  const khach = `IFERROR(ROWS(UNIQUE(FILTER(${sdt},${sdt}<>""))),0)`;
+  const quayLai = `IFERROR(SUMPRODUCT(--(COUNTIF(${sdt},UNIQUE(FILTER(${sdt},${sdt}<>"")))>=2)),0)`;
+  const thangNay = `">="&EOMONTH(TODAY(),-1)+1`;
 
-  sh.getRange('A1').setValue('🎬 ' + CFG.BRAND + ' — BẢNG ĐIỀU KHIỂN').setFontSize(18).setFontWeight('bold').setFontColor(C.navy);
-  sh.getRange('A2').setFormula(`="🟢 Realtime · cập nhật "&TEXT(NOW(),"hh:mm dd/mm/yyyy")&"  ·  Đơn mới nhất: "&IFERROR(TEXT(MAX(${tg}),"hh:mm dd/mm"),"—")`).setFontColor('#00695A');
+  /* ---------- Đầu trang ---------- */
+  sh.getRange('B2:H2').merge().setValue(CFG.BRAND).setFontSize(22).setFontWeight('bold').setFontColor(UI.ink);
+  sh.getRange('B3:H3').merge().setValue('Bảng điều khiển vận hành').setFontSize(11).setFontColor(UI.muted);
+  sh.getRange('I2:M2').merge().setFormula('="●  LIVE"').setFontSize(12).setFontWeight('bold').setFontColor(UI.teal).setHorizontalAlignment('right');
+  sh.getRange('I3:M3').merge().setFormula(`="Cập nhật "&TEXT(NOW(),"hh:mm · dd/mm/yyyy")&"  ·  Đơn gần nhất: "&IF(COUNTA(${ma})=0,"chưa có",TEXT(MAX(${tg}),"hh:mm dd/mm"))`).setHorizontalAlignment('right');
 
-  /* ---------- KPI (A:B) ---------- */
-  const kpi = [
-    ['⚡ HÔM NAY & GẦN ĐÂY', ''],
-    ['Yêu cầu hôm nay', `=COUNTIFS(${tg},">="&TODAY())`],
-    ['Yêu cầu 7 ngày qua', `=COUNTIFS(${tg},">="&TODAY()-6)`],
-    ['Yêu cầu tháng này', `=COUNTIFS(${tg},">="&EOMONTH(TODAY(),-1)+1)`],
-    ['CTV đăng ký 7 ngày qua', `=COUNTIFS(${N('Thời gian ĐK')},">="&TODAY()-6)`],
-    ['📦 ĐƠN HÀNG', ''],
-    ['Tổng yêu cầu', `=COUNTA(${ma})`],
-    ['Chưa xử lý (Mới)', `=COUNTIF(${st},"Mới")`],
-    ['Đang sản xuất', `=SUM(COUNTIF(${st},${active}))`],
-    ['Hoàn thành', `=COUNTIF(${st},"Hoàn thành")`],
-    ['Hủy', `=COUNTIF(${st},"Hủy")`],
-    ['Tỉ lệ chốt đơn', '=IFERROR((B12+B13)/(B10-B11),"—")'],
-    ['CTV nộp đúng hạn', rate('CTV đúng hạn?')],
-    ['Giao khách đúng hạn', rate('Giao khách đúng hạn?')],
-    ['💰 TÀI CHÍNH', ''],
-    ['Doanh thu đã thu', `=SUM(${D('Đã thu')})`],
-    ['Khách còn nợ', `=SUM(${D('Còn phải thu')})`],
-    ['Giá trị TB / đơn chốt', `=IFERROR(AVERAGE(${D('Giá chốt')}),0)`],
-    ['Đã trả CTV', `=SUM(${D('Đã trả CTV')})`],
-    ['Còn nợ CTV', `=SUM(${D('Thù lao CTV')})-SUM(${D('Đã trả CTV')})`],
-    ['Lợi nhuận thực (tiền mặt)', '=B19-B22'],
-    ['Lợi nhuận gộp (theo giá chốt)', `=SUMIFS(${D('Lợi nhuận gộp')},${st},"<>Hủy")`],
-    ['👥 KHÁCH & CỘNG TÁC VIÊN', ''],
-    ['Số khách (theo SĐT)', `=IFERROR(ROWS(UNIQUE(FILTER(${sdt},${sdt}<>""))),0)`],
-    ['Khách quay lại (≥ 2 đơn)', `=IFERROR(SUMPRODUCT(--(COUNTIF(${sdt},UNIQUE(FILTER(${sdt},${sdt}<>"")))>=2)),0)`],
-    ['CTV đã đăng ký', `=COUNTA(${N('Mã CTV')})`],
-    ['CTV đang hoạt động', `=COUNTIF(${N('Trạng thái')},"Đang hoạt động")`],
-    ['CTV chờ duyệt / test', `=COUNTIF(${N('Trạng thái')},"Mới đăng ký")+COUNTIF(${N('Trạng thái')},"Đang làm bài test")`]
-  ];
-  const k0 = 4;
-  sh.getRange(k0, 1, kpi.length, 1).setValues(kpi.map(r => [r[0]]));
-  kpi.forEach((r, i) => { if (r[1]) sh.getRange(k0 + i, 2).setFormula(r[1]); });
-  sh.getRange(k0, 2, kpi.length, 1).setFontWeight('bold').setHorizontalAlignment('right').setNumberFormat('#,##0');
-  // Dòng: 5 hôm nay · 10 tổng · 11 mới · 12 đang SX · 13 xong · 15-17 tỉ lệ · 19-25 tiền · 27-31 người
-  ['B19', 'B20', 'B21', 'B22', 'B23', 'B24', 'B25'].forEach(a => sh.getRange(a).setNumberFormat(MONEY));
-  ['B15', 'B16', 'B17'].forEach(a => sh.getRange(a).setNumberFormat('0%'));
-  kpi.forEach((r, i) => {
-    const rg = sh.getRange(k0 + i, 1, 1, 2);
-    if (!r[1]) rg.merge().setBackground(C.soft).setFontColor(C.ink).setFontWeight('bold');
-    else rg.setBackground(i % 2 ? '#FFFFFF' : C.zebra);
-  });
-  sh.getRange(k0, 1, kpi.length, 2).setBorder(true, true, true, true, null, null, '#D5DAEA', SpreadsheetApp.BorderStyle.SOLID);
-  sh.getRange('B5').setFontColor('#1A3FA8').setFontSize(13);
-  sh.getRange('B11').setFontColor('#B42318').setFontSize(13);
-  sh.getRange('B24').setFontColor('#00695A').setFontSize(13);
-  sh.getRange('B31').setFontColor('#5B2CB8');
+  /* ---------- Thẻ số liệu ---------- */
+  card_(sh, 5, 2, 'YÊU CẦU HÔM NAY', `=COUNTIFS(${tg},">="&TODAY())`, `="7 ngày qua: "&COUNTIFS(${tg},">="&TODAY()-6)`, UI.blue, '#,##0');
+  card_(sh, 5, 4, 'CHƯA XỬ LÝ', `=${nNew}`, `="Tổng yêu cầu: "&COUNTA(${ma})`, UI.pink, '#,##0');
+  card_(sh, 5, 6, 'ĐANG SẢN XUẤT', `=${nActive}`, `="Hoàn thành: "&${nDone}`, UI.violet, '#,##0');
+  card_(sh, 5, 8, 'TỈ LỆ CHỐT ĐƠN', `=IFERROR((${nActive}+${nDone})/(COUNTA(${ma})-${nNew}),0)`, `="Đã hủy: "&COUNTIF(${st},"Hủy")`, UI.teal, '0%');
+  card_(sh, 5, 10, 'CTV NỘP ĐÚNG HẠN', `=${rate('CTV đúng hạn?')}`, `="Giao khách đúng hạn: "&${pct(rate('Giao khách đúng hạn?'))}`, UI.orange, '0%');
+  card_(sh, 5, 12, 'CỘNG TÁC VIÊN', `=COUNTA(${N('Mã CTV')})`, `="Hoạt động: "&COUNTIF(${N('Trạng thái')},"Đang hoạt động")&" · Chờ: "&(COUNTIF(${N('Trạng thái')},"Mới đăng ký")+COUNTIF(${N('Trạng thái')},"Đang làm bài test"))`, UI.violet, '#,##0');
+  card_(sh, 9, 2, 'DOANH THU ĐÃ THU', `=${thuTC}`, `="Tháng này: "&${money(`SUMIFS(${thu},${tg},${thangNay},${st},"<>Hủy")`)}`, UI.teal, MONEY);
+  card_(sh, 9, 4, 'LỢI NHUẬN THỰC', `=${thuTC}-${traCTV}`, '="Đã thu trừ đã trả CTV"', UI.teal, MONEY);
+  card_(sh, 9, 6, 'KHÁCH CÒN NỢ', `=SUMIFS(${D('Còn phải thu')},${st},"<>Hủy")`, '="Cần thu thêm"', UI.orange, MONEY);
+  card_(sh, 9, 8, 'CÒN NỢ CTV', `=${noCTV}`, `="Đã trả: "&${money(traCTV)}`, UI.pink, MONEY);
+  card_(sh, 9, 10, 'SỐ KHÁCH HÀNG', `=${khach}`, `="Quay lại: "&${quayLai}`, UI.blue, '#,##0');
+  card_(sh, 9, 12, 'GIÁ TRỊ TB / ĐƠN', `=IFERROR(AVERAGEIFS(${D('Giá chốt')},${st},"<>Hủy"),0)`, '="Theo giá đã chốt"', UI.blue, MONEY);
 
-  /* ---------- Khảo sát (A:B, dưới KPI) ---------- */
-  const s0 = k0 + kpi.length + 2; // 34
-  const ks = [
-    ['📝 KHẢO SÁT (Google Form)', ''],
-    ['Số phản hồi', `=IFERROR(COUNTA(${KS('A')}),0)`],
-    ['Điểm HỮU ÍCH (TB /5)', `=IFERROR(AVERAGE(${KS('F')}),"—")`],
-    ['Điểm KHẢ THI (TB /5)', `=IFERROR(AVERAGE(${KS('G')}),"—")`],
-    ['Website dễ dùng (TB /5)', `=IFERROR(AVERAGE(${KS('H')}),"—")`],
-    ['Giá hợp lý (TB /5)', `=IFERROR(AVERAGE(${KS('I')}),"—")`],
-    ['% thấy hữu ích (≥ 4)', `=IFERROR(COUNTIF(${KS('F')},">=4")/B${s0 + 1},"—")`],
-    ['% sẵn sàng sử dụng (≥ 4)', `=IFERROR(COUNTIF(${KS('G')},">=4")/B${s0 + 1},"—")`]
-  ];
-  sh.getRange(s0, 1, ks.length, 1).setValues(ks.map(r => [r[0]]));
-  ks.forEach((r, i) => { if (r[1]) sh.getRange(s0 + i, 2).setFormula(r[1]); });
-  sh.getRange(s0, 1, 1, 2).merge().setBackground('#E0A100').setFontColor('#FFFFFF').setFontWeight('bold');
-  sh.getRange(s0 + 1, 2, ks.length - 1, 1).setFontWeight('bold').setHorizontalAlignment('right');
-  sh.getRange(s0 + 2, 2, 4, 1).setNumberFormat('0.00');
-  sh.getRange(s0 + 6, 2, 2, 1).setNumberFormat('0%');
-  zebra_(sh, s0 + 1, 1, ks.length - 1, 2);
-  const KS_DIEMYEU_ = KS_DIEMYEU;
-  const y0 = s0 + ks.length + 1;
-  sh.getRange(y0, 1, 1, 2).setValues([['Điểm yếu được chọn nhiều nhất', 'Lượt']]);
-  KS_DIEMYEU_.forEach((x, i) => { sh.getRange(y0 + 1 + i, 1).setValue(x); sh.getRange(y0 + 1 + i, 2).setFormula(`=IFERROR(COUNTIF(${KS('L')},"*${x}*"),0)`); });
-  tbl_(sh, y0, 1, KS_DIEMYEU_.length + 1, 2);
-
-  /* ---------- Trạng thái (D:E) ---------- */
-  hdr_(sh, 3, 4, ['Trạng thái đơn', 'Số đơn']);
-  STATUS_DH.forEach((s, i) => { sh.getRange(4 + i, 4).setValue(s); sh.getRange(4 + i, 5).setFormula(`=COUNTIF(${st},D${4 + i})`); });
-  tbl_(sh, 3, 4, STATUS_DH.length + 1, 2);
-
-  /* ---------- Theo gói (G:I) ---------- */
-  hdr_(sh, 3, 7, ['Gói', 'Số đơn', 'Doanh thu đã thu']);
-  const goi = D('Gói'), thu = D('Đã thu');
-  PACKAGES.concat([['Chưa chắc', 'Chưa chọn / cần tư vấn']]).forEach((p, i) => {
-    const r = 4 + i;
-    sh.getRange(r, 7).setValue(p[0] === 'Chưa chắc' ? p[1] : p[0] + ' · ' + p[1].replace(/^Quay \+ Edit · /, ''));
-    sh.getRange(r, 8).setFormula(`=COUNTIF(${goi},"${p[0]}*")`);
-    sh.getRange(r, 9).setFormula(`=SUMIF(${goi},"${p[0]}*",${thu})`).setNumberFormat(MONEY);
-  });
-  tbl_(sh, 3, 7, PACKAGES.length + 2, 3);
-
-  /* ---------- Nguồn khách (K:L) ---------- */
-  hdr_(sh, 3, 11, ['Nguồn khách (?src=)', 'Số đơn']);
-  sh.getRange(4, 11).setFormula(`=IFERROR(QUERY({${D('Nguồn')}},"select Col1, count(Col1) where Col1 <> '' group by Col1 order by count(Col1) desc limit 8 label count(Col1) ''",0),"Chưa có")`);
-  tbl_(sh, 3, 11, 9, 2);
-
-  /* ---------- Loại dịch vụ (G:I) ---------- */
-  hdr_(sh, 13, 7, ['Loại dịch vụ', 'Số đơn', 'Doanh thu đã thu']);
-  SERVICES.forEach((s, i) => {
-    sh.getRange(14 + i, 7).setValue(s);
-    sh.getRange(14 + i, 8).setFormula(`=COUNTIF(${D('Loại dịch vụ')},G${14 + i})`);
-    sh.getRange(14 + i, 9).setFormula(`=SUMIF(${D('Loại dịch vụ')},G${14 + i},${thu})`).setNumberFormat(MONEY);
-  });
-  tbl_(sh, 13, 7, SERVICES.length + 1, 3);
-
-  /* ---------- Đối tượng khách (D:E) ---------- */
-  hdr_(sh, 15, 4, ['Khách là', 'Số đơn']);
-  DOITUONG.forEach((s, i) => { sh.getRange(16 + i, 4).setValue(s); sh.getRange(16 + i, 5).setFormula(`=COUNTIF(${D('Đối tượng')},D${16 + i})`); });
-  tbl_(sh, 15, 4, DOITUONG.length + 1, 2);
-
-  /* ---------- Kỹ năng CTV (K:L) ---------- */
-  hdr_(sh, 14, 11, ['Kỹ năng CTV', 'Số người']);
-  SKILLS.forEach((s, i) => { sh.getRange(15 + i, 11).setValue(s); sh.getRange(15 + i, 12).setFormula(`=COUNTIF(${N('Kỹ năng')},"*"&K${15 + i}&"*")`); });
-  tbl_(sh, 14, 11, SKILLS.length + 1, 2);
-
-  /* ---------- Theo tháng (D:I) ---------- */
-  const m0 = 34;
-  sh.getRange(m0, 4).setValue('📅 THEO THÁNG — năm:').setFontWeight('bold');
-  sh.getRange(m0, 5).setFormula('=YEAR(TODAY())').setBackground('#FFF4D6').setFontWeight('bold').setNumberFormat('0').setNote('Gõ năm khác để xem.');
-  hdr_(sh, m0 + 1, 4, ['Tháng', 'Yêu cầu', 'Hoàn thành', 'Doanh thu đã thu', 'Thù lao CTV', 'Lợi nhuận gộp']);
+  /* ---------- Dữ liệu cho biểu đồ & bảng (cột Q trở đi) ---------- */
+  sh.getRange('Q1').setValue('Vùng dữ liệu cho biểu đồ — tự tính, không sửa');
+  const put = (c, rows) => sh.getRange(2, c, rows.length, rows[0].length).setValues(rows);
+  put(17, [['Trạng thái', 'Số đơn']].concat(STATUS_DH.map((s, i) => [s, `=COUNTIF(${st},Q${3 + i})`])));
+  const days = [['Ngày', 'Yêu cầu', 'CTV đăng ký']];
+  for (let i = 13; i >= 0; i--) days.push([`=TEXT(TODAY()-${i},"dd/mm")`,
+    `=COUNTIFS(${tg},">="&TODAY()-${i},${tg},"<"&TODAY()-${i - 1})`,
+    `=COUNTIFS(${N('Thời gian ĐK')},">="&TODAY()-${i},${N('Thời gian ĐK')},"<"&TODAY()-${i - 1})`]);
+  put(20, days);
+  const months = [['Tháng', 'Doanh thu', 'Lợi nhuận gộp']];
   for (let m = 1; m <= 12; m++) {
-    const r = m0 + 1 + m;
-    const cond = `${tg},">="&DATE($E$${m0},${m},1),${tg},"<"&EDATE(DATE($E$${m0},${m},1),1)`;
-    sh.getRange(r, 4).setValue('Tháng ' + m);
-    sh.getRange(r, 5).setFormula(`=COUNTIFS(${cond})`);
-    sh.getRange(r, 6).setFormula(`=COUNTIFS(${cond},${st},"Hoàn thành")`);
-    sh.getRange(r, 7).setFormula(`=SUMIFS(${thu},${cond})`);
-    sh.getRange(r, 8).setFormula(`=SUMIFS(${D('Thù lao CTV')},${cond},${st},"<>Hủy")`);
-    sh.getRange(r, 9).setFormula(`=G${r}-H${r}`);
+    const cond = `${tg},">="&DATE(YEAR(TODAY()),${m},1),${tg},"<"&DATE(YEAR(TODAY()),${m + 1},1),${st},"<>Hủy"`;
+    months.push(['T' + m, `=SUMIFS(${thu},${cond})`, `=SUMIFS(${D('Lợi nhuận gộp')},${cond})`]);
   }
-  const mt = m0 + 14;
-  sh.getRange(mt, 4).setValue('Cả năm');
-  ['E', 'F', 'G', 'H', 'I'].forEach(cl => sh.getRange(`${cl}${mt}`).setFormula(`=SUM(${cl}${m0 + 2}:${cl}${m0 + 13})`));
-  sh.getRange(`G${m0 + 2}:I${mt}`).setNumberFormat(MONEY);
-  tbl_(sh, m0 + 1, 4, 14, 6);
-  sh.getRange(mt, 4, 1, 6).setFontWeight('bold').setBackground('#E6F0FF');
-
-  /* ---------- 14 ngày gần nhất (K:M) ---------- */
-  sh.getRange(m0, 11).setValue('📈 14 NGÀY GẦN NHẤT').setFontWeight('bold');
-  hdr_(sh, m0 + 1, 11, ['Ngày', 'Yêu cầu', 'CTV đăng ký']);
-  for (let i = 0; i < 14; i++) {
-    const r = m0 + 2 + i;
-    sh.getRange(r, 11).setFormula(`=TODAY()-${13 - i}`).setNumberFormat('dd/MM');
-    sh.getRange(r, 12).setFormula(`=COUNTIFS(${tg},">="&K${r},${tg},"<"&K${r}+1)`);
-    sh.getRange(r, 13).setFormula(`=COUNTIFS(${N('Thời gian ĐK')},">="&K${r},${N('Thời gian ĐK')},"<"&K${r}+1)`);
-  }
-  tbl_(sh, m0 + 1, 11, 15, 3);
-
-  /* ---------- Cảnh báo hạn ---------- */
-  const a0 = mt + 3; // 51
-  const open = `${st}<>"Hoàn thành",${st}<>"Hủy"`;
-  const alert = (row, col, title, hanName, doneName, whoName, whoLabel) => {
+  put(24, months);
+  put(28, [['Gói', 'Số đơn']].concat(PACKAGES.map(p => [p[0] + ' · ' + p[1].replace('Quay + Edit · ', ''), `=COUNTIF(${goi},"${p[0]}*")`]),
+    [['Cần tư vấn', `=COUNTIF(${goi},"Chưa chắc*")`]]));
+  sh.getRange('AE3').setFormula(`=IFERROR(QUERY({${D('Nguồn')}},"select Col1, count(Col1) where Col1 <> '' group by Col1 order by count(Col1) desc limit 5 label count(Col1) ''",0),"Chưa có dữ liệu")`);
+  put(34, [['Kỹ năng', 'Số người']].concat(SKILLS.map((s, i) => [s, `=COUNTIF(${N('Kỹ năng')},"*"&AH${3 + i}&"*")`])));
+  sh.getRange('AK3').setFormula(`=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(AH3:AI17,AI3:AI17>0),2,FALSE),5,2),"Chưa có dữ liệu")`);
+  const due = (cell, hanName, doneName, whoName) => {
     const han = D(hanName), done = D(doneName);
-    sh.getRange(row, col).setValue(title).setFontWeight('bold').setFontColor('#B42318');
-    hdr_(sh, row + 1, col, ['Mã đơn', whoLabel, 'Hạn', 'Trạng thái']);
-    sh.getRange(row + 2, col).setFormula(
-      `=IFERROR(SORT(FILTER({${ma},${D(whoName)},${han},${st}},${han}<>"",${done}="",${han}<=TODAY()+2,${open}),3,TRUE),"✓ Không có")`);
-    sh.getRange(row + 2, col + 2, 12, 1).setNumberFormat('dd/MM/yyyy');
-    tbl_(sh, row + 1, col, 1, 4);
+    sh.getRange(cell).setFormula(`=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${ma},${D(whoName)},${han},${st}},${han}<>"",${done}="",${han}<=TODAY()+2,${st}<>"Hoàn thành",${st}<>"Hủy"),3,TRUE),5,4),"✓ Không có")`);
   };
-  alert(a0, 4, '⚠️ CTV SẮP / ĐÃ TRỄ HẠN NỘP (≤ 2 ngày)', 'Hạn CTV nộp', 'Ngày CTV nộp', 'CTV phụ trách', 'CTV');
-  alert(a0, 10, '⚠️ SẮP / ĐÃ TRỄ HẠN GIAO KHÁCH (≤ 2 ngày)', 'Hạn giao khách', 'Ngày bàn giao', 'Họ tên', 'Khách');
+  due('AN3', 'Hạn CTV nộp', 'Ngày CTV nộp', 'CTV phụ trách');
+  due('AS3', 'Hạn giao khách', 'Ngày bàn giao', 'Họ tên');
+  sh.getRange('AX3').setFormula(`=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${ma},${D('Họ tên')},${goi},${st},${tg}},${ma}<>""),5,FALSE),5,4),"Chưa có yêu cầu")`);
+  sh.getRange('BC3').setFormula(`=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${N('Mã CTV')},${N('Họ tên')},${N('Kỹ năng')},${N('Trạng thái')},${N('Thời gian ĐK')}},${N('Mã CTV')}<>""),5,FALSE),5,4),"Chưa có CTV")`);
+  put(60, [['Khảo sát', 'Giá trị'],
+    ['Số phản hồi', `=IFERROR(COUNTA(${KS('A')}),0)`],
+    ['Mức độ hữu ích', `=IFERROR(TEXT(AVERAGE(${KS('F')}),"0.00")&" / 5","—")`],
+    ['Tính khả thi', `=IFERROR(TEXT(AVERAGE(${KS('G')}),"0.00")&" / 5","—")`],
+    ['Website dễ dùng', `=IFERROR(TEXT(AVERAGE(${KS('H')}),"0.00")&" / 5","—")`],
+    ['Giá hợp lý', `=IFERROR(TEXT(AVERAGE(${KS('I')}),"0.00")&" / 5","—")`]]);
+  sh.getRange(1, 17, 25, COLS - 16).setFontColor(UI.dim).setFontSize(8);
 
-  /* ---------- Mới nhất ---------- */
-  const l0 = a0 + 16; // 67
-  sh.getRange(l0, 4).setValue('🆕 5 YÊU CẦU MỚI NHẤT').setFontWeight('bold');
-  hdr_(sh, l0 + 1, 4, ['Mã đơn', 'Thời gian', 'Khách', 'Gói', 'Trạng thái']);
-  sh.getRange(l0 + 2, 4).setFormula(
-    `=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${ma},${tg},${D('Họ tên')},${goi},${st}},${ma}<>""),2,FALSE),5,5),"Chưa có yêu cầu")`);
-  sh.getRange(l0 + 2, 5, 5, 1).setNumberFormat('hh:mm dd/MM');
-  tbl_(sh, l0 + 1, 4, 1, 5);
-  sh.getRange(l0, 10).setValue('🧑‍💻 5 CTV ĐĂNG KÝ MỚI NHẤT').setFontWeight('bold');
-  hdr_(sh, l0 + 1, 10, ['Mã CTV', 'Họ tên', 'Kỹ năng', 'Trạng thái']);
-  sh.getRange(l0 + 2, 10).setFormula(
-    `=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${N('Mã CTV')},${N('Họ tên')},${N('Kỹ năng')},${N('Trạng thái')},${N('Thời gian ĐK')}},${N('Mã CTV')}<>""),5,FALSE),5,4),"Chưa có CTV")`);
-  tbl_(sh, l0 + 1, 10, 1, 4);
+  /* ---------- Bảng ---------- */
+  const DATE_F = 'dd/MM/yyyy';
+  panel_(sh, 45, 2, 'CTV sắp / đã trễ hạn nộp', UI.red, [2, 2, 1, 1], ['Mã đơn', 'CTV', 'Hạn', 'Trạng thái'], 40, 5, { 2: DATE_F });
+  panel_(sh, 45, 8, 'Sắp / đã trễ hạn giao khách', UI.red, [2, 2, 1, 1], ['Mã đơn', 'Khách', 'Hạn', 'Trạng thái'], 45, 5, { 2: DATE_F });
+  panel_(sh, 53, 2, 'Yêu cầu mới nhất', UI.blue, [2, 1, 2, 1], ['Mã đơn', 'Khách', 'Gói', 'Trạng thái'], 50, 5, {});
+  panel_(sh, 53, 8, 'Cộng tác viên mới nhất', UI.violet, [1, 2, 2, 1], ['Mã', 'Họ tên', 'Kỹ năng', 'Trạng thái'], 55, 5, {});
+  panel_(sh, 61, 2, 'Nguồn khách', UI.teal, [3, 1], ['Kênh', 'Đơn'], 31, 5, {});
+  panel_(sh, 61, 6, 'Kỹ năng nhiều nhất', UI.violet, [3, 1], ['Kỹ năng', 'Người'], 37, 5, {});
+  panel_(sh, 61, 10, 'Kết quả khảo sát', UI.orange, [3, 1], ['Chỉ số', 'Giá trị'], 60, 5, {});
 
-  [240, 150, 16, 170, 120, 110, 190, 110, 140, 120, 240, 90, 100].forEach((w, i) => sh.setColumnWidth(i + 1, w));
-  sh.setColumnWidth(14, 16);
-
-  /* ---------- Biểu đồ (cột O) ---------- */
-  const put = (b, row) => sh.insertChart(b.setPosition(row, 15, 0, 0).setOption('width', 480).setOption('height', 290).build());
-  put(sh.newChart().asPieChart().addRange(sh.getRange(`D3:E${3 + STATUS_DH.length}`)).setNumHeaders(1)
-    .setOption('title', 'Đơn theo trạng thái').setOption('pieHole', 0.45).setOption('legend', { position: 'right' }), 3);
-  put(sh.newChart().asLineChart().addRange(sh.getRange(`K${m0 + 1}:M${m0 + 15}`)).setNumHeaders(1)
-    .setOption('title', '14 ngày gần nhất').setOption('colors', [C.blue, '#A970FF']).setOption('legend', { position: 'top' }), 19);
-  put(sh.newChart().asColumnChart().addRange(sh.getRange(`D${m0 + 1}:D${m0 + 13}`)).addRange(sh.getRange(`G${m0 + 1}:G${m0 + 13}`))
-    .addRange(sh.getRange(`I${m0 + 1}:I${m0 + 13}`)).setNumHeaders(1)
-    .setOption('title', 'Doanh thu & lợi nhuận theo tháng').setOption('colors', [C.blue, C.teal]).setOption('legend', { position: 'top' }), 35);
-  put(sh.newChart().asBarChart().addRange(sh.getRange(`K14:L${14 + SKILLS.length}`)).setNumHeaders(1)
-    .setOption('title', 'Kỹ năng của đội CTV').setOption('colors', ['#A970FF']).setOption('legend', { position: 'none' }), 51);
+  /* ---------- Biểu đồ ---------- */
+  const W = 664, HT = 326;
+  const dark = (b, legend) => b.setOption('backgroundColor', UI.card)
+    .setOption('titleTextStyle', { color: UI.ink, fontSize: 13, bold: true })
+    .setOption('legend', { position: legend || 'top', textStyle: { color: UI.muted } })
+    .setOption('hAxis', { textStyle: { color: UI.muted }, gridlines: { color: UI.line }, baselineColor: UI.line })
+    .setOption('vAxis', { textStyle: { color: UI.muted }, gridlines: { color: UI.line }, baselineColor: UI.line, minValue: 0 })
+    .setOption('width', W).setOption('height', HT);
+  sh.insertChart(dark(sh.newChart().asAreaChart().addRange(sh.getRange('T2:V16')).setNumHeaders(1)
+    .setOption('title', 'Yêu cầu & CTV đăng ký · 14 ngày').setOption('colors', [UI.blue, UI.violet]))
+    .setPosition(13, 2, 4, 0).build());
+  sh.insertChart(dark(sh.newChart().asPieChart().addRange(sh.getRange('Q2:R11')).setNumHeaders(1)
+    .setOption('title', 'Đơn theo trạng thái').setOption('pieHole', 0.58).setOption('pieSliceBorderColor', UI.card)
+    .setOption('colors', ['#FF9F1C', '#5B9BFF', '#3B7BFF', '#A970FF', '#7B4BE0', '#FF5C8A', '#FFB86B', '#00D1B2', '#6B779C']), 'right')
+    .setPosition(13, 8, 4, 0).build());
+  sh.insertChart(dark(sh.newChart().asColumnChart().addRange(sh.getRange('X2:Z14')).setNumHeaders(1)
+    .setOption('title', 'Doanh thu & lợi nhuận theo tháng').setOption('colors', [UI.blue, UI.teal]))
+    .setPosition(29, 2, 4, 0).build());
+  sh.insertChart(dark(sh.newChart().asBarChart().addRange(sh.getRange('AB2:AC9')).setNumHeaders(1)
+    .setOption('title', 'Số đơn theo gói').setOption('colors', [UI.teal]), 'none')
+    .setPosition(29, 8, 4, 0).build());
 }
 
-function hdr_(sh, r, c, vals) { sh.getRange(r, c, 1, vals.length).setValues([vals]); }
-function zebra_(sh, r, c, nr, nc) { for (let i = 0; i < nr; i++) sh.getRange(r + i, c, 1, nc).setBackground(i % 2 ? '#FFFFFF' : C.zebra); }
-function tbl_(sh, r, c, nr, nc) {
-  sh.getRange(r, c, 1, nc).setBackground(C.soft).setFontColor(C.ink).setFontWeight('bold');
-  sh.getRange(r, c, nr, nc).setBorder(true, true, true, true, true, true, '#D5DAEA', SpreadsheetApp.BorderStyle.SOLID);
-  zebra_(sh, r + 1, c, nr - 1, nc);
+/** Thẻ KPI: nhãn / số lớn / chú thích, rộng 2 cột */
+function card_(sh, r, c, label, value, sub, accent, fmt) {
+  const box = sh.getRange(r, c, 3, 2).setBackground(UI.card);
+  sh.getRange(r, c, 1, 2).merge().setValue(label).setFontSize(9).setFontWeight('bold').setFontColor(UI.muted);
+  sh.getRange(r + 1, c, 1, 2).merge().setFormula(value).setNumberFormat(fmt).setFontSize(20).setFontWeight('bold').setFontColor(accent).setHorizontalAlignment('left');
+  sh.getRange(r + 2, c, 1, 2).merge().setFormula(sub).setFontSize(9).setFontColor(UI.muted);
+  box.setBorder(null, true, true, true, false, false, UI.bg, SpreadsheetApp.BorderStyle.SOLID_THICK);
+  sh.getRange(r, c, 1, 2).setBorder(true, null, null, null, null, null, accent, SpreadsheetApp.BorderStyle.SOLID_THICK);
+}
+
+/** Bảng nhỏ có tiêu đề; mỗi ô đọc từ vùng dữ liệu (bắt đầu dòng 3 của cột srcCol) */
+function panel_(sh, r, c, title, accent, spans, heads, srcCol, n, fmts) {
+  const width = spans.reduce((a, b) => a + b, 0);
+  sh.getRange(r, c, n + 2, width).setBackground(UI.card);
+  sh.getRange(r, c, 1, width).merge().setValue(title).setFontSize(12).setFontWeight('bold').setFontColor(UI.ink);
+  let x = c;
+  spans.forEach((sp, j) => {
+    const h = sh.getRange(r + 1, x, 1, sp); if (sp > 1) h.merge();
+    h.setValue(heads[j]).setBackground(UI.soft).setFontColor(UI.muted).setFontWeight('bold').setFontSize(9);
+    const L = colLetter_(srcCol + j);
+    for (let i = 0; i < n; i++) {
+      const cell = sh.getRange(r + 2 + i, x, 1, sp); if (sp > 1) cell.merge();
+      cell.setFormula(`=IF(${L}${3 + i}="","",${L}${3 + i})`).setFontColor(UI.ink).setWrap(false);
+      if (fmts[j]) cell.setNumberFormat(fmts[j]);
+    }
+    x += sp;
+  });
+  sh.getRange(r, c, n + 2, width).setBorder(null, true, true, true, false, false, UI.bg, SpreadsheetApp.BorderStyle.SOLID_THICK);
+  sh.getRange(r, c, 1, width).setBorder(true, null, null, null, null, null, accent, SpreadsheetApp.BorderStyle.SOLID_THICK);
 }
 
 /* ============================================================================

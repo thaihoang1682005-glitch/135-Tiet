@@ -166,19 +166,19 @@ function source() {
   catch { return "Trực tiếp"; }
 }
 async function send(payload) {
-  if (!C.SHEET_ENDPOINT) {
-    console.warn("[Demo] Chưa cấu hình SHEET_ENDPOINT – dữ liệu chưa được gửi:", payload);
-    await new Promise(r => setTimeout(r, 600));
-    return { demo: true };
-  }
-  // text/plain để Apps Script nhận được mà không bị chặn CORS
-  await fetch(C.SHEET_ENDPOINT, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
-  return { ok: true };
+  if (!C.SHEET_ENDPOINT) throw new Error("Chưa cấu hình SHEET_ENDPOINT");
+  // text/plain để không phát sinh preflight; đọc phản hồi để chỉ báo thành công khi Sheet đã ghi xong
+  const res = await fetch(C.SHEET_ENDPOINT, { method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || "Sheet không ghi được dữ liệu");
+  return data;
 }
+/** Trả về kết quả từ Sheet, hoặc null nếu chưa ghi được (form giữ nguyên để gửi lại) */
 async function submitWith(btn, fn) {
   const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = "Đang gửi…";
-  try { const r = await fn(); if (r && r.demo) toast("Chế độ demo: chưa kết nối Google Sheet."); return true; }
-  catch (err) { console.error(err); toast("Gửi chưa được. Bạn kiểm tra mạng hoặc nhắn Zalo giúp nhé.", true); return false; }
+  try { return await fn(); }
+  catch (err) { console.error(err); toast("Chưa gửi được. Bạn thử lại hoặc nhắn Zalo 0399 924 348 nhé.", true); return null; }
   finally { btn.disabled = false; btn.innerHTML = html; }
 }
 

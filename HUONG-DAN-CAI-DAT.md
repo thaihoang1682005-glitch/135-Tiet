@@ -18,6 +18,10 @@
 
 Luồng dữ liệu: **Khách hoặc CTV điền form trên web → Apps Script → ghi thẳng vào Google Sheet → gửi email báo cho Thái.**
 
+> ✅ **Đã cài xong trên Gmail của Thái.** File quản lý chính: [OUTSOURCE STUDIO - Quản lý](https://docs.google.com/spreadsheets/d/11wse8i5vS6_wj_kJZdUb7XUHBhhjmsxAyJJdcVfJTp8/edit). Web App đã gắn trong `website/assets/config.js`. Các bước bên dưới chỉ dùng khi cần cài lại.
+>
+> Lưu ý khi cài lại: Web App phải triển khai bằng **Gmail cá nhân** (tài khoản tổ chức có thể không có quyền "Bất kỳ ai"), và bộ nhớ Google của tài khoản đó không được đầy.
+
 ---
 
 ## Bước 1. Tạo Google Sheet quản lý (đăng nhập bằng Gmail của Thái)
